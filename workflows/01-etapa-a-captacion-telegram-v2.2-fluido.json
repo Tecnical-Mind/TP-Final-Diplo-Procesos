@@ -1,0 +1,1805 @@
+{
+  "name": "Captación Etapa A",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "235b28f3-e005-4a43-b18d-1c3fe0449f28",
+      "name": "Trigger Telegram (mensaje entrante)",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2256,
+        -96
+      ],
+      "webhookId": "b5bb2b91-4adc-4793-b016-e83977a8a45e",
+      "credentials": {
+        "telegramApi": {
+          "id": "HMAZRDNVB9BCY13Y",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrae texto y chat_id del payload de Telegram (Telegram Trigger entrega el Update completo)\n// v2.2: si el caso anterior ya se cerro y el cliente escribe NUEVO CASO, rota la sesion de memoria (epoch)\nconst body = $input.first().json;\nconst msg = body.message || body.edited_message || null;\n\nif (!msg) {\n  throw new Error('No se pudo ubicar el mensaje entrante en el payload de Telegram. Revisar formato del update.');\n}\n\nconst chat_id = msg.chat.id;\nconst texto = msg.text || '';\nconst chatKey = String(chat_id);\n\nconst staticData = $getWorkflowStaticData('global');\nstaticData.captacion = staticData.captacion || {};\nstaticData.captacionEpoch = staticData.captacionEpoch || {};\nlet epoch = staticData.captacionEpoch[chatKey] || 1;\n\nconst previo = staticData.captacion[chatKey] || {};\nconst pideNuevoCaso = /^\\s*(nuevo caso|nuevo|reiniciar|\\/start)\\s*$/i.test(texto);\nif (pideNuevoCaso && previo._cerrado) {\n  epoch += 1;\n  staticData.captacionEpoch[chatKey] = epoch;\n  delete staticData.captacion[chatKey];  // solo se limpia cuando el cliente pide explicitamente un caso nuevo\n}\n\n// epoch 1 conserva la clave historica tg_<chat_id>: la Simple Memory acumulada NO se pierde\nconst session_key = epoch === 1 ? `tg_${chat_id}` : `tg_${chat_id}_e${epoch}`;\n\nreturn [{\n  json: {\n    chat_id,\n    texto_mensaje: texto,\n    message_id: msg.message_id,\n    session_key,\n  }\n}];\n"
+      },
+      "id": "417f31d6-a925-4063-ad71-a982e2818735",
+      "name": "Normalizar mensaje entrante",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2032,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.texto_mensaje }}",
+        "options": {
+          "systemMessage": "Sos un extractor de datos silencioso para un estudio juridico de accidentes de transito. Recibis los mensajes de una persona; tu UNICA salida es un objeto JSON plano (sin ```, sin saludos, sin ninguna palabra fuera del JSON) con estos 21 campos y su \"value\": el dato REAL que la persona dijo en la conversacion (incluido este ultimo mensaje), o null si aun no lo dijo.\n\nReglas de extraccion:\n- Nunca inventes ni completes datos que la persona no dio.\n- hubo_lesiones: true o false solo si la persona lo dijo; si no, null.\n- fecha_hora_hecho: solo si tiene dia, mes, ano y hora aproximada; normalizala como texto claro (ej: \"02/05/2026 12:30\"). Si falta el ano o la hora, dejala null.\n- vehiculo_propio: aceptar cualquier descripcion (tipo, marca, color, patente). Bicicleta o peaton tambien vale como descripcion.\n- Si un mensaje trae varios datos a la vez, carga todos.\n\nEstructura exacta de la salida (solo cambian los value):\n{\"formulario\":{\"campos\":[{\"id\":\"nombre_apellido_cliente\",\"value\":null},{\"id\":\"dni\",\"value\":null},{\"id\":\"telefono_whatsapp\",\"value\":null},{\"id\":\"email\",\"value\":null},{\"id\":\"nacionalidad\",\"value\":null},{\"id\":\"grupo_familiar\",\"value\":null},{\"id\":\"profesion_especialidad_antiguedad\",\"value\":null},{\"id\":\"domicilio_laboral_bono_sueldo\",\"value\":null},{\"id\":\"padre_madre_menor\",\"value\":null},{\"id\":\"fecha_hora_hecho\",\"value\":null},{\"id\":\"lugar_hecho\",\"value\":null},{\"id\":\"dependencia_policial\",\"value\":null},{\"id\":\"numero_sumario\",\"value\":null},{\"id\":\"vehiculo_propio\",\"value\":null},{\"id\":\"aseguradora_propia\",\"value\":null},{\"id\":\"datos_tercero\",\"value\":null},{\"id\":\"aseguradora_tercero\",\"value\":null},{\"id\":\"hubo_lesiones\",\"value\":null},{\"id\":\"detalle_lesiones\",\"value\":null},{\"id\":\"testigos\",\"value\":null},{\"id\":\"fotos_videos\",\"value\":null}]}}"
+        }
+      },
+      "id": "6a783239-ce24-4a7d-a166-550d18f12613",
+      "name": "Agente de Captación",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [
+        -1808,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// v2.1: el LLM solo extrae; el estado se acumula aca (workflowStaticData, por chat_id)\n// y las preguntas al cliente las arma este codigo. Progreso garantizado por turno.\nconst input = $input.first().json;\nconst output = String(input.output || input.text || '');\nconst chat_id = $('Normalizar mensaje entrante').first().json.chat_id;\nconst chatKey = String(chat_id);\n\nconst requiredOrder = [\n  'nombre_apellido_cliente',\n  'dni',\n  'telefono_whatsapp',\n  'fecha_hora_hecho',\n  'lugar_hecho',\n  'vehiculo_propio',\n  'hubo_lesiones',\n];\n\nconst ALL_FIELDS = ['nombre_apellido_cliente','dni','telefono_whatsapp','email','nacionalidad',\n  'grupo_familiar','profesion_especialidad_antiguedad','domicilio_laboral_bono_sueldo',\n  'padre_madre_menor','fecha_hora_hecho','lugar_hecho','dependencia_policial','numero_sumario',\n  'vehiculo_propio','aseguradora_propia','datos_tercero','aseguradora_tercero','hubo_lesiones',\n  'detalle_lesiones','testigos','fotos_videos'];\n\nconst fieldQuestions = {\n  nombre_apellido_cliente: 'Para empezar, decime tu nombre y apellido completo.',\n  dni: 'Decime tu DNI, por favor.',\n  telefono_whatsapp: 'Pasame un telefono o WhatsApp de contacto.',\n  fecha_hora_hecho: 'Decime la fecha completa del accidente (dia, mes y anio) y la hora aproximada. Por ejemplo: 02/05/2026 a las 12:30.',\n  lugar_hecho: 'Contame donde fue el accidente: calle, esquina y ciudad si los recordas.',\n  vehiculo_propio: 'Contame en que te movias vos: tipo de vehiculo, marca/modelo, color y patente si tenia (bicicleta o a pie tambien vale).',\n  hubo_lesiones: 'Ultima pregunta clave: hubo lesiones o atencion medica despues del accidente? (si/no)',\n};\n\nfunction tryParseJson(raw) {\n  if (!raw) return null;\n  const cleaned = String(raw).trim().replace(/^```(?:json)?\\s*/i, '').replace(/```$/i, '').trim();\n  try { return JSON.parse(cleaned); } catch (e) { return null; }\n}\n\n// busca el ultimo objeto JSON valido con clave formulario en el texto\nfunction findControl(text) {\n  const results = [];\n  for (let i = 0; i < text.length; i++) {\n    if (text[i] !== '{') continue;\n    let depth = 0, inString = false, escape = false;\n    for (let j = i; j < text.length; j++) {\n      const ch = text[j];\n      if (escape) { escape = false; continue; }\n      if (inString && ch === '\\\\') { escape = true; continue; }\n      if (ch === '\"') { inString = !inString; continue; }\n      if (inString) continue;\n      if (ch === '{') depth++;\n      if (ch === '}') {\n        depth--;\n        if (depth === 0) {\n          const parsed = tryParseJson(text.slice(i, j + 1));\n          if (parsed && parsed.formulario) results.push(parsed);\n          i = j;\n          break;\n        }\n      }\n    }\n  }\n  return results.length ? results[results.length - 1] : null;\n}\n\nfunction hasValue(v) {\n  if (typeof v === 'boolean') return true;\n  return v !== undefined && v !== null && String(v).trim() !== '';\n}\n\n// --- estado persistente por chat (sobrevive entre mensajes con el workflow Activo) ---\nconst staticData = $getWorkflowStaticData('global');\nstaticData.captacion = staticData.captacion || {};\nconst previo = staticData.captacion[chatKey] || {};\n\n// FIX anti-loop: si el caso de este chat ya se cerro, NO se vuelve a registrar nada.\n// La Simple Memory hace que el LLM re-extraiga todos los datos en cada mensaje posterior;\n// sin esta guarda, cada respuesta del cliente disparaba de nuevo carpeta + fila + cita + confirmacion.\nif (previo._cerrado) {\n  return [{\n    json: {\n      chat_id,\n      reply_text: 'Gracias por tu mensaje! Tu caso ya esta registrado y la cita quedo agendada. El estudio va a leer tu respuesta y te contesta a la brevedad. Si necesitas iniciar un caso nuevo, escribi: NUEVO CASO.',\n      status: 'caso_cerrado',\n      campos_faltantes: null,\n      formulario: { campos: ALL_FIELDS.map(id => ({ id, value: previo[id] ?? null })) },\n      parse_ok: true,\n      parse_error: null,\n      raw_output: output,\n    }\n  }];\n}\n\nconst teniaDatosAntes = Object.keys(previo).filter(k => !k.startsWith('_')).some(k => hasValue(previo[k]));\n\nconst parsed = findControl(output) || tryParseJson(output);\nlet nuevosEsteTurno = 0;\nif (parsed && parsed.formulario && Array.isArray(parsed.formulario.campos)) {\n  for (const campo of parsed.formulario.campos) {\n    const v = campo.value ?? campo.valor ?? null;\n    if (hasValue(v)) {\n      if (!hasValue(previo[campo.id]) || String(previo[campo.id]) !== String(v)) nuevosEsteTurno++;\n      previo[campo.id] = v;  // el dato queda guardado aunque el modelo lo olvide despues\n    }\n  }\n}\nstaticData.captacion[chatKey] = previo;\n\nconst missing = requiredOrder.filter(f => !hasValue(previo[f]));\nconst status = missing.length === 0 ? 'captacion_completa' : 'captacion_incompleta';\n\n// --- mensaje al cliente: SIEMPRE deterministico (el LLM no redacta nada visible) ---\nlet visible;\nif (status === 'captacion_completa') {\n  visible = '';  // la confirmacion la envia el nodo de cierre con los datos de la cita\n  previo._cerrado = true;  // marca el chat como cerrado: los proximos mensajes NO re-registran el caso\n  previo._cerrado_en = new Date().toISOString();\n  staticData.captacion[chatKey] = previo;  // los datos capturados quedan guardados; se reabre con NUEVO CASO\n} else {\n  const siguiente = fieldQuestions[missing[0]];\n  if (!teniaDatosAntes && nuevosEsteTurno === 0) {\n    visible = 'Hola! Soy Santiago, del Estudio Juridico TP Final. Lamento el accidente que tuviste. '\n      + 'Te hago unas preguntas cortas para armar tu caso y coordinarte una cita presencial cuanto antes. '\n      + siguiente;\n  } else if (nuevosEsteTurno > 0) {\n    visible = 'Anotado, gracias. ' + siguiente;\n  } else {\n    visible = 'Perdon, no llegue a registrar ese dato. ' + siguiente;\n  }\n}\n\n// formulario consolidado para los nodos de cierre (Generar ID lee campos[].value)\nconst formulario = { campos: ALL_FIELDS.map(id => ({ id, value: previo[id] ?? null })) };\n\nreturn [{\n  json: {\n    chat_id,\n    reply_text: visible,\n    status,\n    campos_faltantes: missing.length ? missing : null,\n    formulario,\n    parse_ok: parsed !== null,\n    parse_error: parsed ? null : 'El modelo no devolvio JSON; se re-pregunta deterministicamente.',\n    raw_output: output,\n  }\n}];"
+      },
+      "id": "565fd1a7-9305-464d-96a1-bda841776637",
+      "name": "Extraer JSON del bot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1456,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "loop-status-not-empty",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "516b9b38-7f64-4bc1-83cb-22a0bc4467b1",
+      "name": "¿Se pudo interpretar la respuesta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1232,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1264378767,
+          "mode": "list",
+          "cachedResultName": "Casos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=1264378767"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "caso_id",
+              "displayName": "caso_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_captura",
+              "displayName": "fecha_captura",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nombre_apellido_cliente",
+              "displayName": "nombre_apellido_cliente",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dni",
+              "displayName": "dni",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "telefono_whatsapp",
+              "displayName": "telefono_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nacionalidad",
+              "displayName": "nacionalidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "grupo_familiar",
+              "displayName": "grupo_familiar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "profesion_especialidad_antiguedad",
+              "displayName": "profesion_especialidad_antiguedad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "domicilio_laboral_bono_sueldo",
+              "displayName": "domicilio_laboral_bono_sueldo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "padre_madre_menor",
+              "displayName": "padre_madre_menor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado_civil",
+              "displayName": "estado_civil",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_hora_hecho",
+              "displayName": "fecha_hora_hecho",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lugar_hecho",
+              "displayName": "lugar_hecho",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dependencia_policial",
+              "displayName": "dependencia_policial",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "numero_sumario",
+              "displayName": "numero_sumario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vehiculo_propio",
+              "displayName": "vehiculo_propio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aseguradora_propia",
+              "displayName": "aseguradora_propia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "datos_tercero",
+              "displayName": "datos_tercero",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aseguradora_tercero",
+              "displayName": "aseguradora_tercero",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hubo_lesiones",
+              "displayName": "hubo_lesiones",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detalle_lesiones",
+              "displayName": "detalle_lesiones",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "asistencia_medica_json",
+              "displayName": "asistencia_medica_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "testigos",
+              "displayName": "testigos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fotos_videos_urls",
+              "displayName": "fotos_videos_urls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "carpeta_drive_id",
+              "displayName": "carpeta_drive_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cita_presencial_evento_id",
+              "displayName": "cita_presencial_evento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ultima_actividad",
+              "displayName": "ultima_actividad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reintentos_recordatorio",
+              "displayName": "reintentos_recordatorio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "motivo_decision",
+              "displayName": "motivo_decision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_decision",
+              "displayName": "fecha_decision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "borrador_demanda_url",
+              "displayName": "borrador_demanda_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "datos_faltantes_demanda",
+              "displayName": "datos_faltantes_demanda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aprobado_abogado",
+              "displayName": "aprobado_abogado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_presentacion_demanda",
+              "displayName": "fecha_presentacion_demanda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "comprobante_demanda_url",
+              "displayName": "comprobante_demanda_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "fd1c01d3-34c3-4bd8-b1f5-fdd58e32f95f",
+      "name": "Registrar error de parseo",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -1008,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Normalizar mensaje entrante').item.json.chat_id }}",
+        "text": "Disculpá, no pude procesar bien tu último mensaje. ¿Podés repetir el último dato, por favor?",
+        "additionalFields": {}
+      },
+      "id": "91462cbf-adc6-4585-bf0f-562494db67dd",
+      "name": "Pedir repetir último dato",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -784,
+        112
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "cca3d83c-3d69-4313-a876-ace24f14173d",
+      "credentials": {
+        "telegramApi": {
+          "id": "HMAZRDNVB9BCY13Y",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "captacion_incompleta",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "e4d6b7b3-3ed5-40ed-9014-fecfe7750e6b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "enviar otra pregunta"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "captacion_completa",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "7fb2f593-edd2-4a5b-83e9-600d5a7dfdbf"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Registrar "
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "caso_cerrado",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "a1c2e3f4-0000-4b5c-8d6e-7f8091a2b3c4"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Caso ya cerrado"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "id": "20fdd33b-4291-4fd9-86ef-107424281a2c",
+      "name": "Estado de captación",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -1008,
+        -192
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply_text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "40e60129-27a9-4e78-b964-dfedecd316d7",
+      "name": "Responder pregunta pendiente",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -784,
+        -288
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "bcc4ad7e-b7dc-4634-8feb-9390a4b3050d",
+      "credentials": {
+        "telegramApi": {
+          "id": "HMAZRDNVB9BCY13Y",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Arma caso_id y nombre de carpeta AAAA-MM-DD_Apellido_DNI a partir del formulario capturado\nconst campos = {};\nfor (const c of $json.formulario.campos) { campos[c.id] = c.value ?? c.valor ?? null; }\n\nconst hoy = new Date();\nconst fecha = hoy.toISOString().slice(0, 10);\n\nconst nombreCompleto = (campos.nombre_apellido_cliente || 'SinNombre').trim();\nconst apellido = nombreCompleto.split(' ').slice(-1)[0].replace(/[^a-zA-Z0-9]/g, '');\nconst dni = (campos.dni || 'SinDNI').replace(/[^0-9]/g, '');\n\nconst caso_id = `${fecha}_${apellido}_${dni}_${Math.random().toString(36).slice(2, 7)}`;\nconst nombre_carpeta = `${fecha}_${apellido}_${dni}`;\n\nreturn [{\n  json: {\n    ...campos,\n    caso_id,\n    nombre_carpeta,\n    fecha_captura: hoy.toISOString(),\n    estado: 'Captación completa',\n    chat_id: $('Normalizar mensaje entrante').first().json.chat_id,\n  }\n}];\n"
+      },
+      "id": "a5ab9aa2-7a67-4b77-85f6-d68d9fc4f66e",
+      "name": "Generar ID de caso y carpeta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -784,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $json.nombre_carpeta }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "14CsLd5by-X5u4QbFTdE7tUrXwhnnJdUM",
+          "mode": "list",
+          "cachedResultName": "Varios TP Final",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/14CsLd5by-X5u4QbFTdE7tUrXwhnnJdUM"
+        },
+        "options": {}
+      },
+      "id": "d8909378-ac31-44f6-8d50-e5101a92a14b",
+      "name": "Crear carpeta digital del caso",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -560,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "4365A8LtktCLKfeQ",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1264378767,
+          "mode": "list",
+          "cachedResultName": "Casos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=1264378767"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "caso_id": "={{ $('Generar ID de caso y carpeta').item.json.caso_id }}",
+            "nombre_apellido_cliente": "={{ $json.name }}",
+            "telefono_whatsapp": "={{ $('Generar ID de caso y carpeta').item.json.telefono_whatsapp }}",
+            "estado": "={{ $('Generar ID de caso y carpeta').item.json.estado }}",
+            "hubo_lesiones": "={{ $('Generar ID de caso y carpeta').item.json.hubo_lesiones }}",
+            "detalle_lesiones": "={{ $('Generar ID de caso y carpeta').item.json.detalle_lesiones }}",
+            "dni": "={{ $('Generar ID de caso y carpeta').item.json.dni }}",
+            "lugar_hecho": "={{ $('Generar ID de caso y carpeta').item.json.lugar_hecho }}",
+            "fecha_hora_hecho": "={{ $('Generar ID de caso y carpeta').item.json.fecha_hora_hecho }}",
+            "vehiculo_propio": "={{ $('Generar ID de caso y carpeta').item.json.vehiculo_propio }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "caso_id",
+              "displayName": "caso_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_captura",
+              "displayName": "fecha_captura",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nombre_apellido_cliente",
+              "displayName": "nombre_apellido_cliente",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dni",
+              "displayName": "dni",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "telefono_whatsapp",
+              "displayName": "telefono_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nacionalidad",
+              "displayName": "nacionalidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "grupo_familiar",
+              "displayName": "grupo_familiar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "profesion_especialidad_antiguedad",
+              "displayName": "profesion_especialidad_antiguedad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "domicilio_laboral_bono_sueldo",
+              "displayName": "domicilio_laboral_bono_sueldo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "padre_madre_menor",
+              "displayName": "padre_madre_menor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado_civil",
+              "displayName": "estado_civil",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_hora_hecho",
+              "displayName": "fecha_hora_hecho",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lugar_hecho",
+              "displayName": "lugar_hecho",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dependencia_policial",
+              "displayName": "dependencia_policial",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "numero_sumario",
+              "displayName": "numero_sumario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vehiculo_propio",
+              "displayName": "vehiculo_propio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aseguradora_propia",
+              "displayName": "aseguradora_propia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "datos_tercero",
+              "displayName": "datos_tercero",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aseguradora_tercero",
+              "displayName": "aseguradora_tercero",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hubo_lesiones",
+              "displayName": "hubo_lesiones",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detalle_lesiones",
+              "displayName": "detalle_lesiones",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "asistencia_medica_json",
+              "displayName": "asistencia_medica_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "testigos",
+              "displayName": "testigos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fotos_videos_urls",
+              "displayName": "fotos_videos_urls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "carpeta_drive_id",
+              "displayName": "carpeta_drive_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cita_presencial_evento_id",
+              "displayName": "cita_presencial_evento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ultima_actividad",
+              "displayName": "ultima_actividad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reintentos_recordatorio",
+              "displayName": "reintentos_recordatorio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "motivo_decision",
+              "displayName": "motivo_decision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_decision",
+              "displayName": "fecha_decision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "borrador_demanda_url",
+              "displayName": "borrador_demanda_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "datos_faltantes_demanda",
+              "displayName": "datos_faltantes_demanda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aprobado_abogado",
+              "displayName": "aprobado_abogado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_presentacion_demanda",
+              "displayName": "fecha_presentacion_demanda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "comprobante_demanda_url",
+              "displayName": "comprobante_demanda_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "b66c1fb1-2153-4b17-8114-5e501a5acc8a",
+      "name": "Registrar caso en Casos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        -336,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "891bdc3706b36daae40f970bb92ea7387b6bb3b96ef504ec9d272ed3d3bba2ca@group.calendar.google.com",
+          "mode": "list",
+          "cachedResultName": "Estudio Jurídico"
+        },
+        "start": "={{ $now.plus({days: 1}).set({hour: 10, minute: 0}).toISO() }}",
+        "end": "={{ $now.plus({days: 1}).set({hour: 10, minute: 30}).toISO() }}",
+        "additionalFields": {
+          "summary": "=Cita presencial - {{ $('Generar ID de caso y carpeta').item.json.nombre_apellido_cliente }}"
+        }
+      },
+      "id": "315467b1-7494-4cef-80e9-6fa75f5a6deb",
+      "name": "Crear cita presencial",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [
+        -112,
+        -96
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "5wrIOO8Fl92go5cp",
+          "name": "Google Calendar account"
+        }
+      },
+      "notes": "Fecha/hora placeholder (mañana 10hs) - ajustar a disponibilidad real del estudio."
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('¿Se pudo interpretar la respuesta?').item.json.chat_id }}",
+        "text": "=¡Gracias {{ $('Generar ID de caso y carpeta').item.json.nombre_apellido_cliente }}! Ya registré tu caso y tenés cita presencial en el estudio: {{ $now.plus({days: 1}).setZone('America/Argentina/Buenos_Aires').toFormat(\"cccc dd/LL\") }} a las 10:00 hs. Si ese horario no te sirve, respondé este mensaje y lo reprogramamos.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "None"
+        }
+      },
+      "id": "a1487947-bfcc-4c39-874b-078da5fe5e49",
+      "name": "Enviar confirmación Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        128,
+        -192
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "e40bce40-4cbd-402e-bb7a-4135494a3ec7",
+      "credentials": {
+        "telegramApi": {
+          "id": "HMAZRDNVB9BCY13Y",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1264378767,
+          "mode": "list",
+          "cachedResultName": "Casos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=1264378767"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "caso_id": "={{ $('Registrar caso en Casos').item.json.caso_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "caso_id",
+              "displayName": "caso_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_captura",
+              "displayName": "fecha_captura",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nombre_apellido_cliente",
+              "displayName": "nombre_apellido_cliente",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dni",
+              "displayName": "dni",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "telefono_whatsapp",
+              "displayName": "telefono_whatsapp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "nacionalidad",
+              "displayName": "nacionalidad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "grupo_familiar",
+              "displayName": "grupo_familiar",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "profesion_especialidad_antiguedad",
+              "displayName": "profesion_especialidad_antiguedad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "domicilio_laboral_bono_sueldo",
+              "displayName": "domicilio_laboral_bono_sueldo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "padre_madre_menor",
+              "displayName": "padre_madre_menor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado_civil",
+              "displayName": "estado_civil",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_hora_hecho",
+              "displayName": "fecha_hora_hecho",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lugar_hecho",
+              "displayName": "lugar_hecho",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "dependencia_policial",
+              "displayName": "dependencia_policial",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "numero_sumario",
+              "displayName": "numero_sumario",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "vehiculo_propio",
+              "displayName": "vehiculo_propio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aseguradora_propia",
+              "displayName": "aseguradora_propia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "datos_tercero",
+              "displayName": "datos_tercero",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aseguradora_tercero",
+              "displayName": "aseguradora_tercero",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hubo_lesiones",
+              "displayName": "hubo_lesiones",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detalle_lesiones",
+              "displayName": "detalle_lesiones",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "asistencia_medica_json",
+              "displayName": "asistencia_medica_json",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "testigos",
+              "displayName": "testigos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fotos_videos_urls",
+              "displayName": "fotos_videos_urls",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "carpeta_drive_id",
+              "displayName": "carpeta_drive_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "cita_presencial_evento_id",
+              "displayName": "cita_presencial_evento_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ultima_actividad",
+              "displayName": "ultima_actividad",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reintentos_recordatorio",
+              "displayName": "reintentos_recordatorio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "motivo_decision",
+              "displayName": "motivo_decision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_decision",
+              "displayName": "fecha_decision",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "borrador_demanda_url",
+              "displayName": "borrador_demanda_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "datos_faltantes_demanda",
+              "displayName": "datos_faltantes_demanda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aprobado_abogado",
+              "displayName": "aprobado_abogado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_presentacion_demanda",
+              "displayName": "fecha_presentacion_demanda",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "comprobante_demanda_url",
+              "displayName": "comprobante_demanda_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c0327780-9749-46ea-b41b-994d31ebd4f7",
+      "name": "Registrar auditoría (captación completa)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        352,
+        -192
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "PUT_URL_WEBHOOK_ETAPA_B_AQUI",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ caso_id: $('Generar ID de caso y carpeta').item.json.caso_id }) }}",
+        "options": {}
+      },
+      "id": "08d09265-c0a4-4d8e-9dfb-fd20ecc0d274",
+      "name": "Avisar a Etapa B (caso listo para oficiar)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        576,
+        -192
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput",
+      "notes": "Reemplazar por la Production URL del Webhook 'Recibir caso a oficiar' del workflow Etapa B una vez importado."
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5"
+        },
+        "options": {
+          "maxTokensToSample": 1024
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.5,
+      "position": [
+        -1792,
+        144
+      ],
+      "id": "1a0c2851-2dd9-4683-a4cd-22ff5c78104f",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "IOWt0oRyZR3Inw8o",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Normalizar mensaje entrante').first().json.session_key }}",
+        "contextWindowLength": 40
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        -1664,
+        144
+      ],
+      "id": "8be49ba1-b093-485e-9fe3-5d3c86cd7e76",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "sendTo": "infomtlsa+diplo@gmail.com",
+        "subject": "Nueva cita presencial ",
+        "message": "={{ $('Registrar caso en Casos').item.json.caso_id }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        128,
+        16
+      ],
+      "id": "ecf041a5-1f48-4898-8e73-9193577c6fb9",
+      "name": "Send a message",
+      "webhookId": "6c142028-e830-4f80-9c4a-d942853c8def",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ElOpNpOU5sBxzalt",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Normalizar mensaje entrante": {
+      "main": [
+        [
+          {
+            "node": "Agente de Captación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente de Captación": {
+      "main": [
+        [
+          {
+            "node": "Extraer JSON del bot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer JSON del bot": {
+      "main": [
+        [
+          {
+            "node": "¿Se pudo interpretar la respuesta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Se pudo interpretar la respuesta?": {
+      "main": [
+        [
+          {
+            "node": "Estado de captación",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar error de parseo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar error de parseo": {
+      "main": [
+        [
+          {
+            "node": "Pedir repetir último dato",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Estado de captación": {
+      "main": [
+        [
+          {
+            "node": "Responder pregunta pendiente",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generar ID de caso y carpeta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder pregunta pendiente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear carpeta digital del caso": {
+      "main": [
+        [
+          {
+            "node": "Registrar caso en Casos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar caso en Casos": {
+      "main": [
+        [
+          {
+            "node": "Crear cita presencial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crear cita presencial": {
+      "main": [
+        [
+          {
+            "node": "Enviar confirmación Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar auditoría (captación completa)": {
+      "main": [
+        [
+          {
+            "node": "Avisar a Etapa B (caso listo para oficiar)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Telegram (mensaje entrante)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar mensaje entrante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar confirmación Telegram": {
+      "main": [
+        [
+          {
+            "node": "Registrar auditoría (captación completa)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Agente de Captación",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Agente de Captación",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar ID de caso y carpeta": {
+      "main": [
+        [
+          {
+            "node": "Crear carpeta digital del caso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "5fff9e05-7aad-4d18-ae94-6ec4fc3e8da8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b4e66716119901703c10cfa1dfd1dec8fd3b9a738a6ff0d7c71354d4aa1957af"
+  },
+  "nodeGroups": [],
+  "id": "crnOjnyVS1S2jXmh",
+  "tags": []
+}
