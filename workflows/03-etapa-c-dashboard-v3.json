@@ -1,0 +1,383 @@
+{
+  "name": "Estudio Juridico - Etapa C - Dashboard (v3)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "b5593a85-c6d0-4f40-bf71-96af2d71dc1a",
+      "name": "Recalcular dashboard cada hora",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        32,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1264378767,
+          "mode": "list",
+          "cachedResultName": "Casos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=1264378767"
+        },
+        "options": {}
+      },
+      "id": "defb2fc7-1838-4d0b-873f-3b1ba1a7e4da",
+      "name": "Leer Casos",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        304,
+        464
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 476214670,
+          "mode": "list",
+          "cachedResultName": "Oficios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=476214670"
+        },
+        "options": {}
+      },
+      "id": "9b7298b4-f408-4cd4-ba23-844d7ce7c89d",
+      "name": "Leer Oficios",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        288,
+        736
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sin IA ni decisiones automáticas: solo agrega lo que ya produjo la Etapa B (sección 5).\n// v3.1: corre en cadena (Casos -> Oficios -> acá) para no ejecutarse dos veces ni referenciar\n// nodos sin ejecutar; ignora filas vacías (alwaysOutputData) y agrega una fila TOTAL.\nconst casos = $('Leer Casos').all().map(x => x.json).filter(c => c.caso_id);\nconst oficios = $('Leer Oficios').all().map(x => x.json).filter(o => o.oficio_id || o.caso_id);\n\nconst PENDIENTES = ['Enviado', 'Reiterado 1', 'Reiterado 2'];\nconst RESPONDIDOS = ['Respondida', 'Respondida parcial', 'Rechazo solicitud'];\n\nconst estadoPorCaso = {};\nconst porEstado = {};\nfor (const c of casos) {\n  const e = c.estado || '(sin estado)';\n  estadoPorCaso[c.caso_id] = e;\n  porEstado[e] = (porEstado[e] || 0) + 1;\n}\n\nconst totalOficios = oficios.length;\nconst totalRespondidos = oficios.filter(o => RESPONDIDOS.includes(o.estado)).length;\nconst totalVencidos = oficios.filter(o => o.estado === 'Vencido sin respuesta').length;\nconst totalPendientes = oficios.filter(o => PENDIENTES.includes(o.estado)).length;\nconst pctGlobal = totalOficios ? Math.round((totalRespondidos / totalOficios) * 100) : 0;\nconst actualizado_el = new Date().toISOString();\n\nconst filas = Object.keys(porEstado).map(estado => ({\n  estado,\n  cantidad_casos: porEstado[estado],\n  oficios_pendientes: oficios.filter(o => estadoPorCaso[o.caso_id] === estado && PENDIENTES.includes(o.estado)).length,\n  oficios_vencidos: oficios.filter(o => estadoPorCaso[o.caso_id] === estado && o.estado === 'Vencido sin respuesta').length,\n  pct_respondidos_global: pctGlobal,\n  actualizado_el,\n}));\n\n// fila resumen del portafolio completo\nfilas.push({\n  estado: 'TOTAL (portafolio)',\n  cantidad_casos: casos.length,\n  oficios_pendientes: totalPendientes,\n  oficios_vencidos: totalVencidos,\n  pct_respondidos_global: pctGlobal,\n  actualizado_el,\n});\n\nreturn filas.map(f => ({ json: f }));\n"
+      },
+      "id": "46627d1c-006c-4ff6-b837-1543a482559d",
+      "name": "Calcular agregados de portafolio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1lBTNV5Y_cw7vUYkIgluFf2xetz_Am3z0OIYk0d3O3E0",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Dashboard_Portafolio",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cantidad_casos": "={{ $json.cantidad_casos }}",
+            "oficios_vencidos": "={{ $json.oficios_vencidos }}",
+            "oficios_pendientes": "={{ $json.oficios_pendientes }}",
+            "estado": "={{ $json.oficios_pendientes }}",
+            "actualizado_el": "={{ $json.actualizado_el }}",
+            "pct_respondidos_global": "={{ $json.pct_respondidos_global }}"
+          },
+          "matchingColumns": [
+            "cantidad_casos"
+          ],
+          "schema": [
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cantidad_casos",
+              "displayName": "cantidad_casos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "oficios_pendientes",
+              "displayName": "oficios_pendientes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "oficios_vencidos",
+              "displayName": "oficios_vencidos",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "pct_respondidos_global",
+              "displayName": "pct_respondidos_global",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "actualizado_el",
+              "displayName": "actualizado_el",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "76d34d7c-01d2-44e6-aba4-ec641908c041",
+      "name": "Escribir Dashboard_Portafolio",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        816,
+        544
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alerta liviana de portafolio - no decide nada, solo avisa antigüedad para que el\n// abogado Senior priorice la revisión manual (Etapa C sigue siendo 100% humana).\n// v3.1: ignora filas vacías y fechas inválidas.\nconst UMBRAL_DIAS_EN_DECISION = 10;\nconst casos = $input.all().map(x => x.json).filter(c => c.caso_id);\nconst ahora = Date.now();\n\nconst estancados = casos.filter(c => {\n  if (c.estado !== 'En decisión') return false;\n  const t = new Date(c.fecha_captura).getTime();\n  if (isNaN(t)) return false;  // fecha inválida o vacía: no rompe el cálculo\n  return (ahora - t) / (1000 * 60 * 60 * 24) > UMBRAL_DIAS_EN_DECISION;\n});\n\nreturn [{ json: { hay_estancados: estancados.length > 0, cantidad: estancados.length,\n                   casos: estancados.map(c => c.caso_id).join(', ') } }];\n"
+      },
+      "id": "d64136e9-8137-4d88-b4a9-1c03ed5a63c4",
+      "name": "Detectar casos estancados en decisión",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hay_estancados }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "39425537-19ed-4a67-a214-ae99f6224054",
+      "name": "¿Hay casos estancados?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        816,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "infomtlsa+diplo@gmail.com",
+        "subject": "Casos esperando decisión hace más de 10 días",
+        "emailType": "text",
+        "message": "={{ 'Casos en decisión hace tiempo (' + $json.cantidad + '): ' + $json.casos + '. Solo es un aviso, la decisión sigue siendo manual.' }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "5a3d2d0a-a416-4a94-b90f-514b19aba98e",
+      "name": "Aviso de portafolio al abogado Senior",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1072,
+        768
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "1b42fbea-b45b-4b9f-b358-f8fca63f9ab0",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ElOpNpOU5sBxzalt",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Recalcular dashboard cada hora": {
+      "main": [
+        [
+          {
+            "node": "Leer Casos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Casos": {
+      "main": [
+        [
+          {
+            "node": "Leer Oficios",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Detectar casos estancados en decisión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer Oficios": {
+      "main": [
+        [
+          {
+            "node": "Calcular agregados de portafolio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular agregados de portafolio": {
+      "main": [
+        [
+          {
+            "node": "Escribir Dashboard_Portafolio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar casos estancados en decisión": {
+      "main": [
+        [
+          {
+            "node": "¿Hay casos estancados?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Hay casos estancados?": {
+      "main": [
+        [
+          {
+            "node": "Aviso de portafolio al abogado Senior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "6d370e28-d04f-4c79-80ce-9ae3e8ad4ce3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b4e66716119901703c10cfa1dfd1dec8fd3b9a738a6ff0d7c71354d4aa1957af"
+  },
+  "nodeGroups": [],
+  "id": "yKGILNrZ23bTQyav",
+  "tags": []
+}

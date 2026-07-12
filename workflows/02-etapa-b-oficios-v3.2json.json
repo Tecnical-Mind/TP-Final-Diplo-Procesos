@@ -1,0 +1,2146 @@
+{
+  "name": "Estudio Juridico - Etapa B - Oficios, Reiteraciones y Clasificacion (v3.1)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "etapa-b-nuevo-caso",
+        "options": {}
+      },
+      "id": "2010e16c-ad3b-4e3d-a8ac-637616b2d6f6",
+      "name": "Recibir caso a oficiar",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        640
+      ],
+      "webhookId": "404135c1-7dc6-494c-b5db-6b1679d1b9eb"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Entrada vía Webhook HTTP (disparado por Etapa A o por Apps Script onEdit)\nconst j = $input.first().json.body || $input.first().json;\nif (!j.caso_id) {\n  throw new Error('El webhook de Etapa B llegó sin caso_id en el body. Se esperaba { \"caso_id\": \"...\" }.');\n}\nreturn [{ json: { caso_id: String(j.caso_id), modo: j.modo || 'oficiamiento' } }];\n"
+      },
+      "id": "608badbb-e620-47d4-8b7a-57c5539c05a9",
+      "name": "Normalizar entrada (Webhook)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2288,
+        640
+      ]
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "caso_id"
+            },
+            {
+              "name": "modo"
+            }
+          ]
+        }
+      },
+      "id": "2df79233-ab22-4f84-8b2a-aaeea384fbdb",
+      "name": "Recibir desde Etapa D (diligenciamiento)",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2048,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Entrada vía Execute Workflow (reutilizado desde Etapa D para diligenciamiento)\nconst j = $input.first().json;\nif (!j.caso_id) {\n  throw new Error('Etapa D llamó a Etapa B sin caso_id.');\n}\nreturn [{ json: { caso_id: String(j.caso_id), modo: j.modo || 'diligenciamiento' } }];\n"
+      },
+      "id": "ad21c062-f700-4566-8699-f4099b6600ac",
+      "name": "Normalizar entrada (Execute Workflow)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2288,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1264378767,
+          "mode": "list",
+          "cachedResultName": "Casos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=1264378767"
+        },
+        "options": {}
+      },
+      "id": "02b7292b-972d-4295-a039-183fe50a0452",
+      "name": "Leer datos del caso",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2544,
+        736
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1865899832,
+          "mode": "list",
+          "cachedResultName": "Plantillas_Oficios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=1865899832"
+        },
+        "options": {}
+      },
+      "id": "d695dff8-4f2c-4a02-a307-353664a5ba58",
+      "name": "Leer tabla de plantillas",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2800,
+        576
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// A partir de los campos del caso, arma un item por cada institución a oficiar.\n// v3.2: soporta ambos triggers sin romper (isExecuted), falla claro si el caso no existe\n// y si no se identifica ninguna institución deriva el caso al centro médico del estudio (fallback).\nlet entrada = { caso_id: '(desconocido)', modo: 'oficiamiento' };\ntry { if ($('Normalizar entrada (Webhook)').isExecuted) entrada = $('Normalizar entrada (Webhook)').first().json; } catch (e) { /* no ejecutado */ }\ntry { if ($('Normalizar entrada (Execute Workflow)').isExecuted) entrada = $('Normalizar entrada (Execute Workflow)').first().json; } catch (e) { /* no ejecutado */ }\nconst modo = entrada.modo || 'oficiamiento';\n\nconst items = $input.all();\nif (items.length === 0 || !items[0].json.caso_id) {\n  throw new Error(`Caso ${entrada.caso_id}: no se encontró en la hoja Casos. Verificar el caso_id antes de oficiar.`);\n}\nconst caso = items[0].json;\n\nconst instituciones = [];\n\nif (caso.dependencia_policial) {\n  instituciones.push({\n    tipo_institucion: 'comisaria_ministerio_seguridad',\n    institucion: caso.dependencia_policial,\n    objeto: `Remisión de actuaciones / sumario N° ${caso.numero_sumario || 's/n'} referido al hecho del ${caso.fecha_hora_hecho}`,\n  });\n}\nif (caso.aseguradora_propia) {\n  instituciones.push({\n    tipo_institucion: 'aseguradora',\n    institucion: caso.aseguradora_propia,\n    objeto: 'Informe de póliza y cobertura vigente a la fecha del hecho',\n  });\n}\nif (caso.aseguradora_tercero) {\n  instituciones.push({\n    tipo_institucion: 'aseguradora',\n    institucion: caso.aseguradora_tercero,\n    objeto: 'Informe de póliza y cobertura del vehículo tercero interviniente',\n  });\n}\n\nlet asistencia = {};\ntry { asistencia = JSON.parse(caso.asistencia_medica_json || '{}'); } catch (e) { /* queda vacío */ }\nif (asistencia.hospital) {\n  instituciones.push({\n    tipo_institucion: 'hospital',\n    institucion: asistencia.hospital,\n    objeto: 'Historia clínica y parte de atención del hecho',\n  });\n}\nif (asistencia.same) {\n  instituciones.push({\n    tipo_institucion: 'same',\n    institucion: 'SAME',\n    objeto: 'Parte de asistencia prehospitalaria',\n  });\n}\n\n// --- Fallback: sin instituciones externas identificables, el caso lo revisa el centro médico del estudio ---\nif (instituciones.length === 0) {\n  const huboLesiones = String(caso.hubo_lesiones).toLowerCase() === 'true';\n  const detalleLesiones = huboLesiones\n    ? `Lesiones informadas por el cliente${caso.detalle_lesiones ? ': ' + caso.detalle_lesiones : ''}.`\n    : 'Sin lesiones informadas en la captación.';\n  instituciones.push({\n    tipo_institucion: 'centro_medico_estudio',\n    institucion: 'Centro Médico del Estudio Jurídico',\n    objeto: `Revisión médica inicial del cliente ${caso.nombre_apellido_cliente || 's/d'} `\n      + `(caso sin instituciones externas a oficiar). ${detalleLesiones} `\n      + `Hecho del ${caso.fecha_hora_hecho || 's/d'} en ${caso.lugar_hecho || 's/d'}.`,\n  });\n}\n\nreturn instituciones.map(inst => ({ json: { ...caso, ...inst, modo } }));\n"
+      },
+      "id": "e9363708-3c02-4d33-a124-a09f278b0be4",
+      "name": "Determinar instituciones a oficiar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Autocompleta plantilla según tipo de institución (sin IA - section 4.1) y arma nombre de archivo.\n// v3.1: corre por item (varias instituciones = varios oficios) y solo elige email si HAY destinatario.\nconst item = $json;\n\n// En ejecuciones parciales (Execute step) el nodo 'Leer tabla de plantillas' puede no haber corrido\n// porque es una rama paralela: en ese caso se usa catálogo vacío y el oficio cae a canal presencial.\n// En la ejecución completa del workflow las plantillas siempre están disponibles.\nlet plantillas = [];\ntry { plantillas = $('Leer tabla de plantillas').all().map(x => x.json); } catch (e) { plantillas = []; }\nconst match = plantillas.find(p => p.tipo_institucion === item.tipo_institucion) || {};\n\nconst plantillaAceptaEmail = [true, 'TRUE', 'true', 1, '1'].includes(match.acepta_email);\nconst emailDestino = String(match.email_destino_default || item.email_destino || '').trim();\nconst aceptaEmail = plantillaAceptaEmail && emailDestino !== '';\n\nconst hoy = new Date().toISOString().slice(0, 10);\nconst seq = String(Math.floor(Math.random() * 900) + 100);\nconst institucionUpper = String(item.institucion || match.nombre_plantilla || item.tipo_institucion).toUpperCase();\n\nconst nombre_archivo = item.modo === 'diligenciamiento'\n  ? `DILIGENCIAMIENTO-OFICIO JUDICIAL A ${institucionUpper}_${seq}`\n  : `OFICIO COLEGIACION ${institucionUpper} - NORMAL ${seq}`;\n\nconst oficio_id = `${item.caso_id}_${item.tipo_institucion}_${seq}`;\n\nconst texto_oficio = `Por la presente, en el marco del caso ${item.caso_id}, se solicita a ${item.institucion} `\n  + `lo siguiente: ${item.objeto}. Hecho de fecha ${item.fecha_hora_hecho} ocurrido en ${item.lugar_hecho}.`;\n\nreturn {\n  json: {\n    ...item,\n    oficio_id,\n    nombre_archivo,\n    texto_oficio,\n    acepta_email: aceptaEmail,\n    email_destino: emailDestino,\n    fecha_envio_original: hoy,\n    fecha_ultimo_envio: hoy,\n  }\n};\n"
+      },
+      "id": "3eeedbae-426f-457a-9ad3-cc8b85d50373",
+      "name": "Autocompletar oficio y nombre de archivo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3072,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.acepta_email }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "00b51355-3fa7-4a1b-bc38-47e78276587e",
+      "name": "¿Institución acepta email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3328,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_destino }}",
+        "subject": "=Oficio {{ $json.oficio_id }} - {{ $json.institucion }}",
+        "emailType": "text",
+        "message": "={{ $json.texto_oficio }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "1bf5cc60-c622-452f-890d-a3a6aa6cef89",
+      "name": "Enviar oficio por email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3584,
+        720
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "48a41fa4-d318-4e4d-b269-1b16c8a38710",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ElOpNpOU5sBxzalt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "createFromText",
+        "content": "={{ $json.texto_oficio }}",
+        "name": "={{ $json.nombre_archivo }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.carpeta_drive_id || 'root' }}"
+        },
+        "options": {}
+      },
+      "id": "8a846a8a-4304-484b-bd92-9eedd7ee8b6d",
+      "name": "Generar documento para presentación presencial",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3584,
+        912
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "4365A8LtktCLKfeQ",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Guarda el texto del oficio en la carpeta Drive del caso (carpeta_drive_id). Queda pendiente de impresión/presentación presencial - no se auto-envía."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 476214670,
+          "mode": "list",
+          "cachedResultName": "Oficios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=476214670"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "oficio_id": "={{ $('Autocompletar oficio y nombre de archivo').item.json.oficio_id }}",
+            "caso_id": "={{ $('Autocompletar oficio y nombre de archivo').item.json.caso_id }}",
+            "institucion": "={{ $('Autocompletar oficio y nombre de archivo').item.json.institucion }}",
+            "tipo_institucion": "={{ $('Autocompletar oficio y nombre de archivo').item.json.tipo_institucion }}",
+            "objeto": "={{ $('Autocompletar oficio y nombre de archivo').item.json.objeto }}",
+            "canal_envio": "={{ $('Autocompletar oficio y nombre de archivo').item.json.acepta_email ? 'email' : 'presencial' }}",
+            "estado": "Enviado",
+            "reiteraciones": 0,
+            "modo": "={{ $('Autocompletar oficio y nombre de archivo').item.json.modo }}",
+            "fecha_envio_original": "={{ $('Autocompletar oficio y nombre de archivo').item.json.fecha_envio_original }}",
+            "fecha_ultimo_envio": "={{ $('Autocompletar oficio y nombre de archivo').item.json.fecha_ultimo_envio }}",
+            "texto_generado_ia": "={{ $('Autocompletar oficio y nombre de archivo').item.json.texto_oficio }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "oficio_id",
+              "displayName": "oficio_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "caso_id",
+              "displayName": "caso_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "institucion",
+              "displayName": "institucion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo_institucion",
+              "displayName": "tipo_institucion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "objeto",
+              "displayName": "objeto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "canal_envio",
+              "displayName": "canal_envio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reiteraciones",
+              "displayName": "reiteraciones",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "modo",
+              "displayName": "modo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_envio_original",
+              "displayName": "fecha_envio_original",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_ultimo_envio",
+              "displayName": "fecha_ultimo_envio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "texto_generado_ia",
+              "displayName": "texto_generado_ia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resumen_respuesta",
+              "displayName": "resumen_respuesta",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "9b094f12-0b2b-4961-8029-7d74233ec05f",
+      "name": "Registrar oficio enviado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3840,
+        816
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 400118656,
+          "mode": "list",
+          "cachedResultName": "Auditoria",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=400118656"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "caso_id": "={{ $('Autocompletar oficio y nombre de archivo').item.json.caso_id }}",
+            "tipo_accion": "oficio_enviado",
+            "detalle": "=Oficio {{ $('Autocompletar oficio y nombre de archivo').item.json.oficio_id }} a {{ $('Autocompletar oficio y nombre de archivo').item.json.institucion }} ({{ $('Autocompletar oficio y nombre de archivo').item.json.modo }})",
+            "resultado": "ok"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "caso_id",
+              "displayName": "caso_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo_accion",
+              "displayName": "tipo_accion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detalle",
+              "displayName": "detalle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resultado",
+              "displayName": "resultado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "7766d40a-bbf6-4b8d-b723-ebf2bf1a7d41",
+      "name": "Registrar auditoría (oficio enviado)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4112,
+        816
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Enviado ->(5d sin resp.)-> Reiterado 1 ->(5d)-> Reiterado 2 ->(5d)-> Vencido sin respuesta (alerta y no se reintenta más). Una clasificación de respuesta (Trigger 3) saca al oficio del ciclo en cualquier momento.\n\nv3.1: si el oficio no tiene email_destino (canal presencial), la reiteración se redacta y se guarda en la hoja igual, pero no se envía email.",
+        "height": 260,
+        "width": 360,
+        "color": 7
+      },
+      "id": "66052369-72c1-4a1d-8be9-1c7511817fd4",
+      "name": "Nota - Reiteraciones (5 días)",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        3104
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "3854f4ba-2dc3-4f43-83fc-8e7897860513",
+      "name": "Cron reiteraciones y vencimientos",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        2080,
+        3344
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "documentId": {
+          "__rl": true,
+          "value": "1lBTNV5Y_cw7vUYkIgluFf2xetz_Am3z0OIYk0d3O3E0",
+          "mode": "id"
+        }
+      },
+      "id": "4f00ffca-6c54-41f2-a6c3-fcf24c76589e",
+      "name": "Leer oficios pendientes",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2336,
+        3344
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Estados de timer: Enviado -> Reiterado 1 -> Reiterado 2 -> Vencido sin respuesta.\n// Una clasificación de respuesta (4.3) puede sacar al oficio de este ciclo en cualquier momento.\nconst HOY = Date.now();\nconst salida = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  if (!['Enviado', 'Reiterado 1', 'Reiterado 2'].includes(j.estado)) continue;\n  const t = new Date(j.fecha_ultimo_envio).getTime();\n  if (isNaN(t)) continue;  // fecha inválida o vacía: no rompe el cron, se ignora la fila\n  const dias = (HOY - t) / (1000 * 60 * 60 * 24);\n  if (dias < 5) continue;\n\n  if (j.estado === 'Reiterado 2') {\n    salida.push({ json: { ...j, accion: 'vencer' } });\n  } else {\n    const numero_reiteracion = j.estado === 'Enviado' ? 1 : 2;\n    salida.push({ json: { ...j, accion: 'reiterar', numero_reiteracion } });\n  }\n}\nreturn salida;\n"
+      },
+      "id": "fa13b10a-ef13-436f-944c-9a2b70cf8a7d",
+      "name": "Filtrar oficios a reiterar o vencer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2592,
+        3344
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "cd8d565e-a90e-4152-b18d-25cfb40c376b",
+      "name": "Loop por oficio",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        2864,
+        3344
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.accion }}",
+              "rightValue": "vencer",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "470a1c3a-e42d-4c79-b8fc-92cd616dc8d8",
+      "name": "¿Reiterar o vencer?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3120,
+        3232
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1lBTNV5Y_cw7vUYkIgluFf2xetz_Am3z0OIYk0d3O3E0",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Oficios",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "oficio_id": "={{ $json.oficio_id }}",
+            "estado": "Vencido sin respuesta"
+          },
+          "matchingColumns": [
+            "oficio_id"
+          ]
+        },
+        "options": {}
+      },
+      "id": "d4cee9a0-a586-43e2-8a9c-1e863ac0d4ca",
+      "name": "Marcar Vencido sin respuesta",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3376,
+        3136
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "infomtlsa+diplo@gmail.com",
+        "subject": "=Oficio vencido sin respuesta - {{ $('¿Reiterar o vencer?').item.json.caso_id }}",
+        "emailType": "text",
+        "message": "=El oficio {{ $('¿Reiterar o vencer?').item.json.oficio_id }} a {{ $('¿Reiterar o vencer?').item.json.institucion }} agotó las 2 reiteraciones sin respuesta. No se reintenta más automáticamente.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "0a639e3f-7738-4665-9559-074c1c2b6623",
+      "name": "Alertar oficio vencido al abogado Senior",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3632,
+        3136
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "0aeffc9f-a7b9-4107-92bd-95e3f1151e78",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ElOpNpOU5sBxzalt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Prompt 4.2 del documento maestro, con variables ya resueltas (evita colisión de sintaxis {{ }} con n8n)\nconst j = $json;\nconst prompt_final = `Redactá una nota de reiteración formal para un oficio judicial/administrativo\nque no obtuvo respuesta en el plazo esperado. Usá el registro de lenguaje\npropio de la práctica judicial argentina, tono respetuoso pero firme,\nsin amenazas explícitas, dejando constancia de la falta de respuesta y del\nplazo transcurrido.\n\nDatos del oficio original:\n- Institución destinataria: ${j.institucion}\n- N° de oficio / referencia: ${j.oficio_id}\n- Fecha de envío original: ${j.fecha_envio_original}\n- N° de reiteración (1 o 2): ${j.numero_reiteracion}\n- Objeto del oficio: ${j.objeto}\n\nInstrucciones de tono según número de reiteración:\n- Reiteración 1: formal, recordatorio simple del plazo vencido.\n- Reiteración 2: formal, más firme, mencionando que se trata de la segunda\n  solicitud y que la falta de respuesta reiterada puede requerir escalarse\n  por otras vías.\n\nDevolvé solo el texto de la nota, listo para insertar en la plantilla\nmembretada del estudio. No agregues explicaciones fuera del texto.`;\n\nreturn { json: { ...j, prompt_final } };\n"
+      },
+      "id": "b19f0aa8-40a8-4b8d-93fe-c5ff36d31ec4",
+      "name": "Armar prompt de reiteración",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3376,
+        3344
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5"
+        },
+        "options": {
+          "maxTokensToSample": 4096
+        }
+      },
+      "id": "afde8cf6-fb08-4f80-b894-6e621a40d5b7",
+      "name": "Anthropic Chat Model (reiteración)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.5,
+      "position": [
+        3600,
+        3504
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "IOWt0oRyZR3Inw8o",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt_final }}"
+      },
+      "id": "2b312b32-1802-4870-930f-5b7ac7050346",
+      "name": "Redactar reiteración",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        3632,
+        3344
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// El chainLlm solo devuelve {text}: se recupera el oficio original desde el nodo del prompt.\nconst j = $('Armar prompt de reiteración').item.json;\nconst texto_ia = $json.text || $json.output || '';\n\nconst seq = String(Math.floor(Math.random() * 900) + 100);\nconst institucionUpper = String(j.institucion).toUpperCase();\nconst tag = j.numero_reiteracion === 1 ? 'REITERACION DEBIL' : 'REITERACION FUERTE';\n\nconst nombre_archivo = j.modo === 'diligenciamiento'\n  ? `DILIGENCIAMIENTO-OFICIO JUDICIAL A ${institucionUpper} - REITERACION ${j.numero_reiteracion}_${seq}`\n  : `OFICIO COLEGIACION ${institucionUpper} - ${tag} ${seq}`;\n\nconst nuevo_estado = `Reiterado ${j.numero_reiteracion}`;\n\nreturn { json: { ...j, texto_ia, nombre_archivo, nuevo_estado } };\n"
+      },
+      "id": "4ff80c31-681c-40d9-b9df-ece662b93aa1",
+      "name": "Nombre de archivo de reiteración",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3904,
+        3344
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.email_destino }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "816a0bc1-d085-46be-b9d7-8122866aa4c9",
+      "name": "¿Reiteración por email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4112,
+        3344
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email_destino }}",
+        "subject": "=Reiteración {{ $json.numero_reiteracion }} - Oficio {{ $json.oficio_id }}",
+        "emailType": "text",
+        "message": "={{ $json.texto_ia }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "57f3f09e-c372-4951-a936-184da74843ee",
+      "name": "Enviar reiteración",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        4336,
+        3232
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "b7cff449-c666-41d8-869e-011fa06b04e5",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ElOpNpOU5sBxzalt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1lBTNV5Y_cw7vUYkIgluFf2xetz_Am3z0OIYk0d3O3E0",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Oficios",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "oficio_id": "={{ $('Nombre de archivo de reiteración').item.json.oficio_id }}",
+            "estado": "={{ $('Nombre de archivo de reiteración').item.json.nuevo_estado }}",
+            "reiteraciones": "={{ $('Nombre de archivo de reiteración').item.json.numero_reiteracion }}",
+            "fecha_ultimo_envio": "={{ $now.toISO().slice(0,10) }}",
+            "texto_generado_ia": "={{ $('Nombre de archivo de reiteración').item.json.texto_ia }}"
+          },
+          "matchingColumns": [
+            "oficio_id"
+          ]
+        },
+        "options": {}
+      },
+      "id": "e57909fa-5c5d-4cbf-a0f0-395215fd040a",
+      "name": "Actualizar oficio reiterado",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4512,
+        3264
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1lBTNV5Y_cw7vUYkIgluFf2xetz_Am3z0OIYk0d3O3E0",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Auditoria",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "caso_id": "={{ $('Nombre de archivo de reiteración').item.json.caso_id }}",
+            "tipo_accion": "reiteracion_generada",
+            "detalle": "=Reiteración {{ $('Nombre de archivo de reiteración').item.json.numero_reiteracion }} del oficio {{ $('Nombre de archivo de reiteración').item.json.oficio_id }} a {{ $('Nombre de archivo de reiteración').item.json.institucion }}",
+            "resultado": "ok"
+          }
+        },
+        "options": {}
+      },
+      "id": "625c9b67-90ef-4e27-b6cc-98b1de1c08ff",
+      "name": "Auditoría IA (reiteración)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4736,
+        3264
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "q": "subject:oficio -from:me"
+        }
+      },
+      "id": "1618977a-1fd7-4a22-91f6-8a450b9add57",
+      "name": "Trigger email entrante (Gmail)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        1392
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ElOpNpOU5sBxzalt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Normaliza el email entrante (Gmail Trigger, salida simplificada) para el prompt de clasificacion.\n// v3.1: corre por item, por si el poll trae varios emails a la vez.\nconst m = $json;\nconst de = m.from?.value?.[0]?.address || m.From || (typeof m.from === 'string' ? m.from : '') || '';\nconst asunto = m.subject || m.Subject || '';\nconst cuerpo = m.text || m.textPlain || m.snippet || '';\nconst contenido_email = `De: ${de}\\nAsunto: ${asunto}\\n\\n${cuerpo}`;\nreturn { json: { contenido_email, email_from: de, email_subject: asunto } };\n"
+      },
+      "id": "18623a7e-4f89-4f49-bebf-bf3d74223d55",
+      "name": "Normalizar email entrante",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1936,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Prompt 4.3 del documento maestro, con el email ya interpolado\nconst j = $json;\nconst prompt_final = `Clasificá el siguiente email recibido como respuesta a un oficio judicial.\nDeterminá:\n1. A qué caso y a qué oficio corresponde. El asunto original tiene el formato\n   \"Oficio <oficio_id> - <institución>\" donde oficio_id empieza con el caso_id\n   (ej: 2026-07-12_Perez_23124123_kpeiy_aseguradora_483). Usá el asunto, el\n   número de oficio o los datos de las partes mencionados para vincularlo.\n2. El estado resultante, una sola opción: \"respondida\" | \"respondida_parcial\"\n   | \"rechazo_solicitud\" | \"no_corresponde_a_oficio\".\n3. Un resumen de 2-3 líneas del contenido relevante para el abogado.\n\nDevolvé únicamente un JSON con este formato:\n{ \"caso_id\": \"...\", \"oficio_id\": \"...\", \"estado\": \"...\", \"resumen\": \"...\" }\n\nSi no podés determinar con confianza a qué caso corresponde, devolvé\n\"caso_id\": null y \"oficio_id\": null y explicá en \"resumen\" por qué, para que\nun humano lo vincule manualmente. Si el email no tiene ninguna relación con\noficios (publicidad, notificaciones automáticas), usá \"no_corresponde_a_oficio\".\n\nEmail a clasificar:\n---\n${j.contenido_email}\n---`;\nreturn { json: { ...j, prompt_final } };\n"
+      },
+      "id": "2f8cfe9f-b3a5-4bdd-a85c-3cc5aa0d8998",
+      "name": "Armar prompt de clasificación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5"
+        },
+        "options": {
+          "maxTokensToSample": 4096
+        }
+      },
+      "id": "11dc68a7-dd2f-4192-b58e-c6a78133b4e4",
+      "name": "Anthropic Chat Model (clasificación)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.5,
+      "position": [
+        2432,
+        1552
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "IOWt0oRyZR3Inw8o",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt_final }}"
+      },
+      "id": "3e447f4b-001e-4288-b2ee-bbcd050bac5d",
+      "name": "Clasificar respuesta",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        2464,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// v3.2: mapea estados a la convención de la hoja, extrae oficio_id y decide la ruta de cada email.\n// Nunca descarta items en silencio: los no relacionados salen con ruta='descartado' (visible en el canvas).\nconst MAPA_ESTADOS = {\n  respondida: 'Respondida',\n  respondida_parcial: 'Respondida parcial',\n  rechazo_solicitud: 'Rechazo solicitud',\n};\n\nconst salida = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  const texto = items[i].json.text || items[i].json.output || '';\n  let parsed = null;\n  try {\n    const match = texto.match(/\\{[\\s\\S]*\\}/);\n    parsed = match ? JSON.parse(match[0]) : null;\n  } catch (e) { /* parsed queda null */ }\n\n  let mail = {};\n  try { mail = $('Normalizar email entrante').itemMatching(i).json; }\n  catch (e) { mail = $('Normalizar email entrante').first().json; }\n\n  const estadoRaw = parsed?.estado ?? null;\n  const estado_respuesta = MAPA_ESTADOS[estadoRaw] || null;\n\n  // ruta: 'vinculado' actualiza el oficio; 'sin_vincular' alerta para revisión humana;\n  // 'descartado' = publicidad/no relacionado, termina visible sin alertar.\n  let ruta;\n  if (estadoRaw === 'no_corresponde_a_oficio') ruta = 'descartado';\n  else if (estado_respuesta && parsed?.caso_id) ruta = 'vinculado';\n  else ruta = 'sin_vincular';\n\n  salida.push({\n    json: {\n      ruta,\n      caso_id: ruta === 'vinculado' ? parsed.caso_id : null,\n      oficio_id: parsed?.oficio_id ?? null,\n      estado_respuesta,\n      resumen: parsed?.resumen ?? 'No se pudo interpretar la clasificación generada por el LLM.',\n      email_from: mail.email_from,\n      email_subject: mail.email_subject,\n      contenido_email: mail.contenido_email,\n    },\n    pairedItem: { item: i },\n  });\n}\nreturn salida;\n"
+      },
+      "id": "a51769e1-0457-497c-82f7-2f861db69d2c",
+      "name": "Parsear clasificación",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2720,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ruta-vinculado-0001",
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "vinculado",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Caso vinculado"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ruta-sinvincular-0002",
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "sin_vincular",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Vinculación manual"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ruta-descartado-0003",
+                    "leftValue": "={{ $json.ruta }}",
+                    "rightValue": "descartado",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Descartado"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "id": "39b70a88-6393-4d4e-b9e4-0dcbfc1e921e",
+      "name": "¿Caso identificado?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2976,
+        1392
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "b24bc86f-de94-429e-9c6c-1b18415184a8",
+      "name": "Descartado (no es respuesta a oficio)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        3232,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1lBTNV5Y_cw7vUYkIgluFf2xetz_Am3z0OIYk0d3O3E0",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Errores",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "timestamp": "={{ $now.toISO() }}",
+            "workflow": "Etapa B - Clasificación",
+            "nodo": "Parsear clasificación",
+            "caso_id": "",
+            "mensaje_error": "={{ 'Respuesta de ' + $json.email_from + ' sin caso vinculado: ' + $json.resumen }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "1c6e6756-cdb0-451f-ac2f-5e1188a14e41",
+      "name": "Registrar sin vincular",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3232,
+        1488
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "infomtlsa+diplo@gmail.com",
+        "subject": "=Email sin caso vinculado - {{ $('Parsear clasificación').item.json.email_from }}",
+        "emailType": "text",
+        "message": "={{ $('Parsear clasificación').item.json.resumen }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "80f47448-7389-4d21-b940-de505ddafb9f",
+      "name": "Alertar vinculación manual",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        3504,
+        1488
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "57a14a34-3c3c-4507-b215-1ab9418958cf",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ElOpNpOU5sBxzalt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1264378767,
+          "mode": "list",
+          "cachedResultName": "Casos",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=1264378767"
+        },
+        "options": {}
+      },
+      "id": "620160a8-40d7-49ab-8c21-b89727a10995",
+      "name": "Leer carpeta del caso",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3200,
+        1296
+      ],
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convención real: '<APELLIDO NOMBRE> DYP- OFICIO JUDICIAL- FIRMADO <REMITENTE>_<seq>'\n// v3.3: tolera ejecuciones parciales (Execute step) y entradas vacías; loguea a consola para debug.\n\n// 1) Fila del caso leída de la hoja Casos (puede venir vacía si el caso_id del LLM no existe)\nconst caso = ($input.all()[0] && $input.all()[0].json) || {};\n\n// 2) Clasificación del email (si 'Parsear clasificación' no corrió en un Execute step, objeto vacío)\nlet p = {};\ntry { p = $('Parsear clasificación').first().json; } catch (e) { p = {}; }\n\nconst seq = String(Math.floor(Math.random() * 900) + 100);\nconst cliente = String(caso.nombre_apellido_cliente || 'CLIENTE').toUpperCase().trim();\nconst remitente = String(p.email_from || 'INSTITUCION').toUpperCase().replace(/[\\\\/:*?\"<>|]/g, '').trim();\n\nconst nombre_archivo = `${cliente} DYP- OFICIO JUDICIAL- FIRMADO ${remitente}_${seq}`;\n\nconsole.log('[Nombre de archivo de respuesta] caso_id:', p.caso_id ?? caso.caso_id ?? '(sin caso)');\nconsole.log('[Nombre de archivo de respuesta] carpeta_drive_id:', caso.carpeta_drive_id || '(sin carpeta, va a raíz de Drive)');\nconsole.log('[Nombre de archivo de respuesta] nombre_archivo:', nombre_archivo);\n\nreturn [{\n  json: {\n    ...p,\n    caso_id: p.caso_id || caso.caso_id || null,\n    nombre_archivo,\n    carpeta_drive_id: caso.carpeta_drive_id || null,\n  }\n}];"
+      },
+      "id": "dee8197b-8ed8-4551-a246-343e334d251a",
+      "name": "Nombre de archivo de respuesta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3392,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "createFromText",
+        "content": "=Respuesta clasificada como: {{ $json.estado_respuesta }}\n\nResumen: {{ $json.resumen }}\n\n{{ $json.contenido_email }}",
+        "name": "={{ $json.nombre_archivo }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.carpeta_drive_id || 'root' }}"
+        },
+        "options": {}
+      },
+      "id": "074a8ad5-5510-4ec5-984f-09479ff49dd1",
+      "name": "Adjuntar respuesta a carpeta del caso",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3616,
+        1296
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "4365A8LtktCLKfeQ",
+          "name": "Google Drive account"
+        }
+      },
+      "notes": "Guarda el texto del email de respuesta + resumen en la carpeta Drive del caso (carpeta_drive_id)."
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 476214670,
+          "mode": "list",
+          "cachedResultName": "Oficios",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=476214670"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "oficio_id": "={{ $json.id }}"
+          },
+          "matchingColumns": [
+            "oficio_id"
+          ],
+          "schema": [
+            {
+              "id": "oficio_id",
+              "displayName": "oficio_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "caso_id",
+              "displayName": "caso_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "institucion",
+              "displayName": "institucion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo_institucion",
+              "displayName": "tipo_institucion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "objeto",
+              "displayName": "objeto",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "canal_envio",
+              "displayName": "canal_envio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "estado",
+              "displayName": "estado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reiteraciones",
+              "displayName": "reiteraciones",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "modo",
+              "displayName": "modo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_envio_original",
+              "displayName": "fecha_envio_original",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fecha_ultimo_envio",
+              "displayName": "fecha_ultimo_envio",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "texto_generado_ia",
+              "displayName": "texto_generado_ia",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resumen_respuesta",
+              "displayName": "resumen_respuesta",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "376cb28c-49a0-4583-bfe1-0c745fb2f409",
+      "name": "Actualizar estado del oficio",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3840,
+        1296
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Nombre de archivo de respuesta').item.json.estado_respuesta }}",
+              "rightValue": "Rechazo solicitud",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c7bc99f0-bf20-450f-aefb-69c171ed3e76",
+      "name": "¿Es rechazo de solicitud?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4064,
+        1296
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "infomtlsa+diplo@gmail.com",
+        "subject": "=Rechazo de solicitud - {{ $('Nombre de archivo de respuesta').item.json.caso_id }}",
+        "emailType": "text",
+        "message": "={{ $('Nombre de archivo de respuesta').item.json.resumen }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "168ff6fc-015f-4ca1-bc37-85e7d3f9987d",
+      "name": "Alertar rechazo de solicitud",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        4304,
+        1216
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "webhookId": "49838397-6bbb-42e5-bcbb-74df63a8e08f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "ElOpNpOU5sBxzalt",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk",
+          "mode": "list",
+          "cachedResultName": "Estudio Juridico - Base Central de Casos v1.2",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 400118656,
+          "mode": "list",
+          "cachedResultName": "Auditoria",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1t-BN-CRodt1W2SpZfXiS61Ovna4gtbH2PxVso_2sdtk/edit#gid=400118656"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "caso_id": "={{ $json.id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "caso_id",
+              "displayName": "caso_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tipo_accion",
+              "displayName": "tipo_accion",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "detalle",
+              "displayName": "detalle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resultado",
+              "displayName": "resultado",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d23925a7-0d09-4d89-8a41-aa2776f1b9e1",
+      "name": "Auditoría (respuesta clasificada)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4784,
+        1552
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "8jL07YoW50bdSIfm",
+          "name": "Google Sheets account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Recibir caso a oficiar": {
+      "main": [
+        [
+          {
+            "node": "Normalizar entrada (Webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar entrada (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Leer datos del caso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recibir desde Etapa D (diligenciamiento)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar entrada (Execute Workflow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar entrada (Execute Workflow)": {
+      "main": [
+        [
+          {
+            "node": "Leer datos del caso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer datos del caso": {
+      "main": [
+        [
+          {
+            "node": "Leer tabla de plantillas",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Determinar instituciones a oficiar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determinar instituciones a oficiar": {
+      "main": [
+        [
+          {
+            "node": "Autocompletar oficio y nombre de archivo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Autocompletar oficio y nombre de archivo": {
+      "main": [
+        [
+          {
+            "node": "¿Institución acepta email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Institución acepta email?": {
+      "main": [
+        [
+          {
+            "node": "Enviar oficio por email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generar documento para presentación presencial",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar oficio por email": {
+      "main": [
+        [
+          {
+            "node": "Registrar oficio enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar documento para presentación presencial": {
+      "main": [
+        [
+          {
+            "node": "Registrar oficio enviado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar oficio enviado": {
+      "main": [
+        [
+          {
+            "node": "Registrar auditoría (oficio enviado)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cron reiteraciones y vencimientos": {
+      "main": [
+        [
+          {
+            "node": "Leer oficios pendientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer oficios pendientes": {
+      "main": [
+        [
+          {
+            "node": "Filtrar oficios a reiterar o vencer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar oficios a reiterar o vencer": {
+      "main": [
+        [
+          {
+            "node": "Loop por oficio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop por oficio": {
+      "main": [
+        [],
+        [
+          {
+            "node": "¿Reiterar o vencer?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Reiterar o vencer?": {
+      "main": [
+        [
+          {
+            "node": "Marcar Vencido sin respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Armar prompt de reiteración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Marcar Vencido sin respuesta": {
+      "main": [
+        [
+          {
+            "node": "Alertar oficio vencido al abogado Senior",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alertar oficio vencido al abogado Senior": {
+      "main": [
+        [
+          {
+            "node": "Loop por oficio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar prompt de reiteración": {
+      "main": [
+        [
+          {
+            "node": "Redactar reiteración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model (reiteración)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Redactar reiteración",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redactar reiteración": {
+      "main": [
+        [
+          {
+            "node": "Nombre de archivo de reiteración",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nombre de archivo de reiteración": {
+      "main": [
+        [
+          {
+            "node": "¿Reiteración por email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Reiteración por email?": {
+      "main": [
+        [
+          {
+            "node": "Enviar reiteración",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actualizar oficio reiterado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar reiteración": {
+      "main": [
+        [
+          {
+            "node": "Actualizar oficio reiterado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar oficio reiterado": {
+      "main": [
+        [
+          {
+            "node": "Auditoría IA (reiteración)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auditoría IA (reiteración)": {
+      "main": [
+        [
+          {
+            "node": "Loop por oficio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar email entrante": {
+      "main": [
+        [
+          {
+            "node": "Armar prompt de clasificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Armar prompt de clasificación": {
+      "main": [
+        [
+          {
+            "node": "Clasificar respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model (clasificación)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Clasificar respuesta",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar respuesta": {
+      "main": [
+        [
+          {
+            "node": "Parsear clasificación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear clasificación": {
+      "main": [
+        [
+          {
+            "node": "¿Caso identificado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Caso identificado?": {
+      "main": [
+        [
+          {
+            "node": "Leer carpeta del caso",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Registrar sin vincular",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Descartado (no es respuesta a oficio)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leer carpeta del caso": {
+      "main": [
+        [
+          {
+            "node": "Nombre de archivo de respuesta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar sin vincular": {
+      "main": [
+        [
+          {
+            "node": "Alertar vinculación manual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nombre de archivo de respuesta": {
+      "main": [
+        [
+          {
+            "node": "Adjuntar respuesta a carpeta del caso",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Adjuntar respuesta a carpeta del caso": {
+      "main": [
+        [
+          {
+            "node": "Actualizar estado del oficio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actualizar estado del oficio": {
+      "main": [
+        [
+          {
+            "node": "¿Es rechazo de solicitud?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Es rechazo de solicitud?": {
+      "main": [
+        [
+          {
+            "node": "Alertar rechazo de solicitud",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Auditoría (respuesta clasificada)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alertar rechazo de solicitud": {
+      "main": [
+        [
+          {
+            "node": "Auditoría (respuesta clasificada)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger email entrante (Gmail)": {
+      "main": [
+        [
+          {
+            "node": "Normalizar email entrante",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "59321990-4f76-47e9-aa78-c35bda609744",
+  "meta": {
+    "instanceId": "b4e66716119901703c10cfa1dfd1dec8fd3b9a738a6ff0d7c71354d4aa1957af"
+  },
+  "nodeGroups": [],
+  "id": "OvLCkxB7CeutfoLW",
+  "tags": []
+}
