@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estudio Jurídico - KPIs</title>
+<style>
+  /* ---- paleta validada (dataviz reference) ---- */
+  :root {
+    --surface: #fcfcfb; --page: #f9f9f7;
+    --ink: #0b0b0b; --ink-2: #52514e; --ink-muted: #898781;
+    --grid: #e1e0d9; --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #008300; --s5: #4a3aa7; --s6: #e34948;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1a1a19; --page: #0d0d0d;
+      --ink: #ffffff; --ink-2: #c3c2b7; --ink-muted: #898781;
+      --grid: #2c2c2a; --border: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #008300; --s5: #9085e9; --s6: #e66767;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page); color: var(--ink); padding: 20px; font-size: 14px;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  h1 { font-size: 18px; font-weight: 650; }
+  .updated { color: var(--ink-muted); font-size: 12px; }
+  button.refresh {
+    margin-left: auto; border: 1px solid var(--border); background: var(--surface); color: var(--ink);
+    border-radius: 8px; padding: 6px 14px; font: inherit; cursor: pointer;
+  }
+  button.refresh:hover { border-color: var(--ink-muted); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .tile .label { color: var(--ink-2); font-size: 12px; margin-bottom: 6px; }
+  .tile .value { font-size: 30px; font-weight: 650; line-height: 1.1; }
+  .tile .sub { color: var(--ink-muted); font-size: 12px; margin-top: 4px; }
+  .tile .sub.good { color: var(--good); }
+  .tile.alert .value { color: var(--critical); }
+  .tile.alert .badge { display: inline-flex; align-items: center; gap: 4px; color: var(--critical); font-size: 12px; margin-top: 4px; }
+
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .card h2 { font-size: 13px; font-weight: 650; color: var(--ink-2); margin-bottom: 12px; }
+
+  /* donut + leyenda */
+  .donut-wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .legend { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+  .legend li { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+  .legend .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .legend .n { margin-left: auto; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; padding-left: 12px; }
+  .donut-center { font-size: 26px; font-weight: 650; fill: var(--ink); }
+  .donut-center-sub { font-size: 10px; fill: var(--ink-muted); }
+
+  /* barras horizontales */
+  .hbar { display: grid; grid-template-columns: 150px 1fr 40px; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .hbar .name { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hbar .track { height: 14px; position: relative; }
+  .hbar .fill { position: absolute; inset: 0 auto 0 0; border-radius: 0 4px 4px 0; min-width: 2px; }
+  .hbar .val { font-size: 12.5px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* estancados */
+  .stuck-item { display: flex; gap: 8px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+  .stuck-item:last-child { border-bottom: none; }
+  .stuck-item .dias { margin-left: auto; color: var(--serious); font-weight: 650; white-space: nowrap; }
+  .empty-ok { color: var(--good); font-size: 13px; }
+
+  details { margin-top: 16px; }
+  summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+  table { border-collapse: collapse; margin-top: 10px; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); }
+  th { color: var(--ink-muted); font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* tooltip */
+  #tip {
+    position: fixed; pointer-events: none; z-index: 10; display: none;
+    background: var(--ink); color: var(--page); font-size: 12px;
+    padding: 5px 9px; border-radius: 6px; max-width: 260px;
+  }
+  .loading { color: var(--ink-muted); padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>⚖️ Estudio Jurídico — KPIs del portafolio</h1>
+    <span class="updated" id="updated"></span>
+    <button class="refresh" onclick="cargar()">↻ Actualizar</button>
+  </header>
+
+  <div id="app" class="loading">Cargando KPIs…</div>
+  <div id="tip"></div>
+
+<script>
+  // Colores por identidad: cada estado conocido tiene SIEMPRE el mismo slot (nunca por ranking).
+  var COLOR_ESTADO_CASO = {
+    'Captación completa': 'var(--s1)',
+    'En decisión':        'var(--s3)',
+    'Demandar':           'var(--s5)',
+    'Pedir más prueba':   'var(--s2)',
+    'Descartar':          'var(--s6)',
+    '(sin estado)':       'var(--ink-muted)'
+  };
+  var COLOR_ESTADO_OFICIO = {
+    'Enviado':               'var(--s1)',
+    'Reiterado 1':           'var(--s3)',
+    'Reiterado 2':           'var(--s5)',
+    'Respondida':            'var(--s2)',
+    'Respondida parcial':    'var(--s2)',
+    'Rechazo solicitud':     'var(--s6)',
+    'Vencido sin respuesta': 'var(--critical)',
+    '(sin estado)':          'var(--ink-muted)'
+  };
+  var EXTRAS = ['var(--s4)', 'var(--s5)', 'var(--s6)'];
+  function colorDe(mapa, estado, i) { return mapa[estado] || EXTRAS[i % EXTRAS.length]; }
+
+  // Datos de ejemplo para abrir el archivo suelto en un navegador (sin Apps Script).
+  var MOCK = {
+    generado: new Date().toISOString(),
+    casos: { total: 12, nuevos7: 3, nuevos30: 9, porEstado: [
+      { estado: 'Captación completa', cantidad: 6 }, { estado: 'En decisión', cantidad: 3 },
+      { estado: 'Demandar', cantidad: 2 }, { estado: 'Descartar', cantidad: 1 } ] },
+    oficios: { total: 14, pendientes: 6, respondidos: 5, vencidos: 3, pctRespondidos: 36,
+      antiguedadPromPendientes: 4.2, porEstado: [
+      { estado: 'Enviado', cantidad: 4 }, { estado: 'Respondida', cantidad: 4 },
+      { estado: 'Vencido sin respuesta', cantidad: 3 }, { estado: 'Reiterado 1', cantidad: 2 },
+      { estado: 'Rechazo solicitud', cantidad: 1 } ] },
+    estancados: [ { caso_id: '2026-07-01_Gomez_30111222_ab1cd', cliente: 'Laura Gomez', dias: 11 } ],
+    umbralEstancados: 10
+  };
+
+  function cargar() {
+    document.getElementById('app').className = 'loading';
+    document.getElementById('app').textContent = 'Cargando KPIs…';
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(render)
+        .withFailureHandler(function (e) {
+          document.getElementById('app').textContent = 'Error leyendo la Sheet: ' + e.message;
+        })
+        .getKpis();
+    } else {
+      render(MOCK); // vista previa fuera de Google
+    }
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // ------- donut SVG -------
+  function arco(cx, cy, r, a0, a1) {
+    var x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+    var x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+    var grande = (a1 - a0) > Math.PI ? 1 : 0;
+    return ['M', x0, y0, 'A', r, r, 0, grande, 1, x1, y1].join(' ');
+  }
+  function donutSvg(datos, total) {
+    var cx = 90, cy = 90, r = 66, ancho = 22;
+    var svg = '<svg width="180" height="180" viewBox="0 0 180 180" role="img" aria-label="Casos por estado">';
+    var ang = -Math.PI / 2, i = 0;
+    datos.forEach(function (d) {
+      var frac = total ? d.cantidad / total : 0;
+      // separador de 2px entre segmentos (gap angular)
+      var gap = datos.length > 1 ? 2 / r : 0;
+      var a0 = ang + gap / 2, a1 = ang + frac * 2 * Math.PI - gap / 2;
+      if (a1 > a0) {
+        svg += '<path d="' + arco(cx, cy, r, a0, a1) + '" fill="none" stroke="' + colorDe(COLOR_ESTADO_CASO, d.estado, i)
+             + '" stroke-width="' + ancho + '" stroke-linecap="butt" class="seg" data-tip="'
+             + esc(d.estado) + ': ' + d.cantidad + ' (' + Math.round(frac * 100) + '%)"/>';
+      }
+      ang += frac * 2 * Math.PI; i++;
+    });
+    svg += '<text x="' + cx + '" y="' + (cy - 2) + '" text-anchor="middle" class="donut-center">' + total + '</text>';
+    svg += '<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" class="donut-center-sub">CASOS</text>';
+    svg += '</svg>';
+    return svg;
+  }
+
+  // ------- render principal -------
+  function render(k) {
+    var f = new Date(k.generado);
+    document.getElementById('updated').textContent =
+      'Actualizado ' + f.toLocaleDateString('es-AR') + ' ' + f.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+    var maxOf = Math.max.apply(null, k.oficios.porEstado.map(function (d) { return d.cantidad; }).concat([1]));
+
+    var html = '';
+
+    // --- tiles ---
+    html += '<div class="tiles">';
+    html += tile('Casos totales', k.casos.total, '+' + k.casos.nuevos7 + ' en 7 días · +' + k.casos.nuevos30 + ' en 30 días', k.casos.nuevos7 > 0 ? 'good' : '');
+    html += tile('Oficios pendientes', k.oficios.pendientes, 'antigüedad prom. ' + k.oficios.antiguedadPromPendientes + ' días', '');
+    html += '<div class="tile' + (k.oficios.vencidos > 0 ? ' alert' : '') + '"><div class="label">Oficios vencidos</div>'
+          + '<div class="value">' + k.oficios.vencidos + '</div>'
+          + (k.oficios.vencidos > 0 ? '<div class="badge">⚠ requieren escalamiento manual</div>' : '<div class="sub">sin vencidos</div>')
+          + '</div>';
+    html += tile('Oficios respondidos', k.oficios.pctRespondidos + '%', k.oficios.respondidos + ' de ' + k.oficios.total + ' oficios', '');
+    html += '</div>';
+
+    // --- gráficos ---
+    html += '<div class="charts">';
+
+    // donut casos por estado + leyenda con valores (etiquetas directas)
+    html += '<div class="card"><h2>Casos por estado</h2><div class="donut-wrap">'
+          + donutSvg(k.casos.porEstado, k.casos.total)
+          + '<ul class="legend">'
+          + k.casos.porEstado.map(function (d, i) {
+              return '<li><span class="dot" style="background:' + colorDe(COLOR_ESTADO_CASO, d.estado, i) + '"></span>'
+                   + esc(d.estado) + '<span class="n">' + d.cantidad + '</span></li>';
+            }).join('')
+          + '</ul></div></div>';
+
+    // barras oficios por estado (etiqueta de valor al final de cada barra)
+    html += '<div class="card"><h2>Oficios por estado</h2>'
+          + k.oficios.porEstado.map(function (d, i) {
+              var w = Math.round(d.cantidad / maxOf * 100);
+              return '<div class="hbar" data-tip="' + esc(d.estado) + ': ' + d.cantidad + '">'
+                   + '<span class="name">' + esc(d.estado) + '</span>'
+                   + '<span class="track"><span class="fill" style="width:' + w + '%;background:' + colorDe(COLOR_ESTADO_OFICIO, d.estado, i) + '"></span></span>'
+                   + '<span class="val">' + d.cantidad + '</span></div>';
+            }).join('')
+          + '</div>';
+
+    // estancados
+    html += '<div class="card"><h2>Casos en decisión hace más de ' + k.umbralEstancados + ' días</h2>';
+    if (k.estancados.length === 0) {
+      html += '<p class="empty-ok">✓ Ningún caso estancado. El Senior está al día.</p>';
+    } else {
+      html += k.estancados.map(function (c) {
+        return '<div class="stuck-item"><span>' + esc(c.cliente || c.caso_id) + '</span>'
+             + '<span style="color:var(--ink-muted);font-size:12px">' + esc(c.caso_id) + '</span>'
+             + '<span class="dias">' + c.dias + ' días</span></div>';
+      }).join('');
+    }
+    html += '</div></div>';
+
+    // --- vista de tabla (accesibilidad / verificación) ---
+    html += '<details><summary>Ver datos en tabla</summary><table><thead><tr>'
+          + '<th>Grupo</th><th>Estado</th><th style="text-align:right">Cantidad</th></tr></thead><tbody>'
+          + k.casos.porEstado.map(function (d) { return '<tr><td>Casos</td><td>' + esc(d.estado) + '</td><td class="num">' + d.cantidad + '</td></tr>'; }).join('')
+          + k.oficios.porEstado.map(function (d) { return '<tr><td>Oficios</td><td>' + esc(d.estado) + '</td><td class="num">' + d.cantidad + '</td></tr>'; }).join('')
+          + '</tbody></table></details>';
+
+    var app = document.getElementById('app');
+    app.className = '';
+    app.innerHTML = html;
+    activarTooltips();
+  }
+
+  function tile(label, value, sub, subClass) {
+    return '<div class="tile"><div class="label">' + esc(label) + '</div><div class="value">' + esc(String(value))
+         + '</div><div class="sub ' + subClass + '">' + esc(sub) + '</div></div>';
+  }
+
+  // ------- tooltips -------
+  function activarTooltips() {
+    var tip = document.getElementById('tip');
+    document.querySelectorAll('[data-tip]').forEach(function (el) {
+      el.addEventListener('mousemove', function (ev) {
+        tip.textContent = el.getAttribute('data-tip');
+        tip.style.display = 'block';
+        tip.style.left = Math.min(ev.clientX + 12, window.innerWidth - 200) + 'px';
+        tip.style.top = (ev.clientY + 14) + 'px';
+      });
+      el.addEventListener('mouseleave', function () { tip.style.display = 'none'; });
+    });
+  }
+
+  cargar();
+</script>
+</body>
+</html>
